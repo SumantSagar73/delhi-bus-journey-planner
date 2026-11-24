@@ -217,7 +217,11 @@ function search(q) {
       if (i < 0) { ok = false; break; }
       score += (i === 0 || p.key[i - 1] === ' ') ? 2 : 1;
     }
-    if (ok) out.push([score + Math.min(p.routes, 100) / 100, p]);
+    if (ok) {
+      const name = p.name.toLowerCase(), q = words.join(' ');
+      if (name === q) score += 6; else if (name.startsWith(q)) score += 3;   // exact / prefix matches first
+      out.push([score + Math.min(p.routes, 100) / 100, p]);
+    }
   }
   return out.sort((a, b) => b[0] - a[0]).slice(0, 40).map(x => x[1]);
 }

@@ -313,12 +313,13 @@ class Planner:
                             v = max(d, 20) / self.city[dtype, int(t_cur // 3600) % 24]
                         t_cur += v
             # walking transfers
-            for s in list(new_marked):
+            rides = {s: (tau[k][s], parent[k][s]) for s in new_marked}   # snapshot: walks start from a bus arrival
+            for s, (ts, ps) in rides.items():
                 for s2, w in self.foot[s]:
-                    t = tau[k][s] + w
+                    t = ts + w
                     if t < min(best[s2], target):
                         tau[k][s2] = best[s2] = t
-                        parent[k][s2] = ("walk", s)
+                        parent[k][s2] = ("walk", s, ts, ps)
                         new_marked.add(s2)
             for s, w in egress.items():
                 target = min(target, tau[k][s] + w)
@@ -333,9 +334,8 @@ class Planner:
         while k > 0:
             p = parent[k][s]
             if p[0] == "walk":
-                steps.append(("walk", p[1], s, tau[k][p[1]], tau[k][s]))
-                s = p[1]
-                p = parent[k][s]
+                steps.append(("walk", p[1], s, p[2], tau[k][s]))
+                s, p = p[1], p[3]
             r, a, b, t_arr_board, w = p[1], p[2], p[3], p[4], p[5]
             steps.append(("ride", r, a, b, t_arr_board, w))
             s = self.routes[r][1][a]
