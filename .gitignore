@@ -12,3 +12,4 @@ data/model_val/
 validation/rides_test.csv
 src/.tmp/
 .claude/
+data/build_scratch.duckdb*

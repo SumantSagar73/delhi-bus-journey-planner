@@ -115,10 +115,22 @@ the first Phase 2 task.
 
 ## 6. Results (see VALIDATION.md)
 
-Held-out test: model built from 1–24 Oct, tested on thousands of real bus rides from 25–31 Oct.
-Our model's error is about half the timetable's, and it follows the morning and evening peaks that the timetable
-ignores. A "flat" model built from the same GPS data but without time of day sits in between, which shows that
-modelling the hour of day matters.
+Held-out test: model built from 1–24 Oct, tested on 28,000 real bus rides from 25–31 Oct (5–30 stops each).
+
+| method | mean abs. error | rides within ±20% |
+|---|---|---|
+| **Our model** | **2.7 min** | **72%** |
+| Same GPS data, no time of day | 3.9 min | 55% |
+| Official timetable | 4.8 min | 41% |
+
+The timetable assumes about the same time per stop all day. Real weekday buses take about 76 s per stop at 5 am and
+158 s at 6 pm, and the model follows that curve. The main remaining error is a trend: the test week (the run-up to
+Diwali) was slower than the training weeks, so weekday evenings are predicted about 7% too fast. The live
+correction layer is designed to close that gap.
+
+Data used: 38.4 million stop-to-stop observations from 31 days. 57% of model values come from a stretch's own
+hourly measurements (L1), 33% from its all-day profile (L2), 10% from nearby roads (L3), and 0.4% from the citywide
+average (L4).
 
 ## 7. Limitations and next steps
 

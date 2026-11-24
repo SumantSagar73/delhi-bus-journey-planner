@@ -136,6 +136,26 @@ def main(model_dir, test_from):
     rows = [{"method": name, **metrics(rides, col)} for name, col in
             [("Our model", "model_s"), ("Flat model (no time of day)", "flat_s"), ("Timetable", "timetable_s")]]
     md.append(table(rows, ["method", "MAE (min)", "MAPE", "within ±20%", "bias (min)"]))
+    mm, tt, ff = metrics(rides, "model_s"), metrics(rides, "timetable_s"), metrics(rides, "flat_s")
+    wk = rides[rides.daytype == "weekday"]
+    eve = wk[wk.hour.between(17, 20)]
+    eve_ratio = eve.model_s.sum() / eve.actual_s.sum()
+    md.append(f"""
+### Key findings
+
+- **Our model's average error is {mm['MAE (min)']} min vs {tt['MAE (min)']} min for the timetable**
+  ({(1 - mm['MAE (min)'] / tt['MAE (min)']) * 100:.0f}% lower), and it gets {mm['within ±20%']} of rides within ±20%
+  against {tt['within ±20%']} for the timetable.
+- **Time of day matters.** The same GPS data without time of day (flat model) has {ff['MAE (min)']} min error, so about
+  {(ff['MAE (min)'] - mm['MAE (min)']) / (tt['MAE (min)'] - mm['MAE (min)']) * 100:.0f}% of our gain over the
+  timetable comes from modelling the hour of day; the rest from using measured rather than scheduled speeds.
+- **The timetable is flat; real traffic isn't.** The timetable assumes about the same time per stop all day. Real
+  buses on weekdays are roughly twice as slow at 6 pm as at 5 am, and the model tracks that curve (table below).
+- **Honest weakness: a trend the history can't see.** The test week ({test_days[0]} to {test_days[-1]}, the run-up
+  to Diwali) was slower than the training weeks. On weekday evenings (17–21 h) the model predicts
+  {eve_ratio * 100:.0f}% of the real time, i.e. it is {(1 - eve_ratio) * 100:.0f}% optimistic. Recency weighting of
+  history and the live-data correction (TECHNICAL_NOTE.md §5) are designed for exactly this.
+""")
 
     md.append("\n## By time of day\n")
     rows = []

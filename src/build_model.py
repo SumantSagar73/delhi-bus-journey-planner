@@ -57,54 +57,73 @@ def main(train_until=None, out=MODEL):
         raise SystemExit("no processed days found")
     print(f"building from {len(days)} days: {days[0]} .. {days[-1]}")
 
-    con = duckdb.connect()
-    con.execute("SET memory_limit='1200MB'")
-    con.execute("CREATE TABLE dt_map (day VARCHAR, dtype INT)")
+    # Work tables live in a scratch file on disk, so the whole month (40M+ rows)
+    # fits within ~2 GB of memory.
+    scratch = config.DATA / "build_scratch.duckdb"
+    scratch.unlink(missing_ok=True)
+    con = duckdb.connect(str(scratch))
+    con.execute("SET memory_limit='2GB'")
+    con.execute("SET threads=4")
+    con.execute("SET preserve_insertion_order=false")
+    con.execute("CREATE TABLE dt_map (day VARCHAR, dtype TINYINT)")
     con.executemany("INSERT INTO dt_map VALUES (?, ?)", [(d, daytype(d)) for d in days])
     flist = ", ".join(f"'{EVENTS}/segments_{d}.parquet'" for d in days)
+    # Compact types (numbers, not text) keep 40M rows small. Medians and percentiles
+    # use DuckDB's approx_quantile (t-digest): within a fraction of a percent of exact,
+    # and with tiny, constant memory.
     con.execute(f"""
       CREATE TABLE obs AS
-      SELECT o.from_stop, o.to_stop, o.route_id, o.run, o.day, m.dtype,
-             CAST(((o.t_from + 19800) % 86400) // 3600 AS INT) AS hour,   -- IST hour
-             o.dt, o.dist_m
+      SELECT CAST(o.from_stop AS INTEGER) from_stop, CAST(o.to_stop AS INTEGER) to_stop,
+             CAST(o.route_id AS INTEGER) route_id, hash(o.run, o.day) run_day,
+             CAST(right(o.day, 2) AS TINYINT) dom, m.dtype,
+             CAST(((o.t_from + 19800) % 86400) // 3600 AS TINYINT) AS hour,   -- IST hour
+             CAST(o.dt AS FLOAT) dt, CAST(o.dist_m AS FLOAT) dist_m
       FROM read_parquet([{flist}]) o JOIN dt_map m USING (day)""")
 
     # Robust cleaning: drop observations far outside the stretch's normal range
-    # (bus broke down, driver break, bad GPS). Uses median +/- 4 x MAD in log space.
+    # (bus broke down, driver break, bad GPS). Median +/- 4 x MAD in log space.
     con.execute("""
       CREATE TABLE seg_stats AS
-      SELECT from_stop, to_stop, median(ln(dt)) mu FROM obs GROUP BY 1,2""")
+      SELECT from_stop, to_stop, approx_quantile(ln(dt), 0.5) mu FROM obs GROUP BY 1,2""")
     con.execute("""
       CREATE TABLE seg_mad AS
-      SELECT o.from_stop, o.to_stop, s.mu, greatest(median(abs(ln(o.dt) - s.mu)), 0.1) mad
-      FROM obs o JOIN seg_stats s USING (from_stop, to_stop) GROUP BY 1,2,3""")
+      SELECT o.from_stop, o.to_stop, any_value(s.mu) mu, greatest(approx_quantile(abs(ln(o.dt) - s.mu), 0.5), 0.1) mad
+      FROM obs o JOIN seg_stats s USING (from_stop, to_stop) GROUP BY 1,2""")
     con.execute("""
       CREATE TABLE clean AS
       SELECT o.* FROM obs o JOIN seg_mad s USING (from_stop, to_stop)
       WHERE abs(ln(o.dt) - s.mu) <= 4 * 1.4826 * s.mad""")
     n_all, n_clean = con.execute("SELECT (SELECT count(*) FROM obs), (SELECT count(*) FROM clean)").fetchone()
+    con.execute("DROP TABLE obs")
     print(f"observations: {n_all:,}  kept after outlier removal: {n_clean:,} ({n_clean / n_all:.1%})")
 
     # L1: per stretch, day type, hour
     l1 = con.execute("""
-      SELECT from_stop, to_stop, dtype, hour, count(*) n, avg(ln(dt)) mlog,
-             quantile_cont(dt, 0.5) p50, quantile_cont(dt, 0.85) p85
+      SELECT CAST(from_stop AS VARCHAR) from_stop, CAST(to_stop AS VARCHAR) to_stop, dtype, hour,
+             count(*) n, avg(ln(dt)) mlog, coalesce(var_samp(ln(dt)), 0) v
       FROM clean GROUP BY 1,2,3,4""").df()
+    # "Bad day" = 85th percentile. Travel times are close to log-normal, so
+    # p85 = exp(mean_log + 1.036 * sd_log). The spread is shrunk toward a typical
+    # 0.3 when a group has few observations.
+    sd = np.sqrt(((l1.n - 1) * l1.v + 4 * 0.09) / (l1.n + 3))
+    l1["p85"] = np.exp(l1.mlog + 1.036 * sd)
     # all-day typical per stretch
-    seg = con.execute("""
-      SELECT from_stop, to_stop, count(*) n_all, median(dt) med_all, median(dist_m) dist_m
-      FROM clean GROUP BY 1,2""").df()
+    con.execute("""
+      CREATE TABLE seg AS SELECT from_stop, to_stop, count(*) n_all, exp(avg(ln(dt))) med_all,
+             avg(dist_m) dist_m FROM clean GROUP BY 1,2""")  # typical = geometric-mean time
+    seg = con.execute("""SELECT CAST(from_stop AS VARCHAR) from_stop, CAST(to_stop AS VARCHAR) to_stop,
+                         n_all, med_all, dist_m FROM seg""").df()
     # citywide hour profile: how much slower/faster than the stretch's typical time
     prof = con.execute("""
-      SELECT c.dtype, c.hour, exp(median(ln(c.dt) - ln(s.med_all))) factor, count(*) n
-      FROM clean c JOIN (SELECT from_stop, to_stop, median(dt) med_all FROM clean GROUP BY 1,2) s
-      USING (from_stop, to_stop) GROUP BY 1,2""").df()
+      SELECT c.dtype, c.hour, exp(approx_quantile(ln(c.dt) - ln(s.med_all), 0.5)) factor, count(*) n
+      FROM clean c JOIN seg s USING (from_stop, to_stop) GROUP BY 1,2""").df()
     city = con.execute("""
       SELECT dtype, hour, sum(dist_m) / sum(dt) speed_ms FROM clean GROUP BY 1,2""").df()
     # service frequency actually observed: distinct bus runs per route per hour per day
     freq = con.execute("""
-      SELECT route_id, dtype, hour, count(DISTINCT run || day) / count(DISTINCT day) runs_per_hour
-      FROM clean WHERE from_stop IN (SELECT from_stop FROM clean GROUP BY 1) GROUP BY 1,2,3""").df()
+      SELECT CAST(route_id AS VARCHAR) route_id, dtype, hour,
+             count(DISTINCT run_day) / count(DISTINCT dom) runs_per_hour
+      FROM clean GROUP BY 1,2,3""").df()
 
     # Fill gaps in the hour profile / city speed (e.g. 3 am Saturday) from neighbours.
     full = pd.MultiIndex.from_product([range(3), range(24)], names=["dtype", "hour"])
@@ -165,7 +184,8 @@ def main(train_until=None, out=MODEL):
     corr = con.execute("""
       WITH g AS (SELECT from_stop, to_stop, count(*) n, avg(dt) am, exp(avg(ln(dt))) gm
                  FROM clean GROUP BY from_stop, to_stop, dtype, hour)
-      SELECT from_stop, to_stop, sum(n * am) / sum(n * gm) ratio, sum(n) n FROM g GROUP BY 1,2""").df()
+      SELECT CAST(from_stop AS VARCHAR) from_stop, CAST(to_stop AS VARCHAR) to_stop,
+             sum(n * am) / sum(n * gm) ratio, sum(n) n FROM g GROUP BY 1,2""").df()
     glob = float((corr.ratio * corr.n).sum() / corr.n.sum())
     corr["ratio"] = (corr.n * corr.ratio + 50 * glob) / (corr.n + 50)
     ratio = np.full(P, glob)
@@ -204,6 +224,8 @@ def main(train_until=None, out=MODEL):
     pd.DataFrame({"day": days}).to_csv(out / "train_days.csv", index=False)
 
     lv = level.reshape(-1)
+    con.close()
+    scratch.unlink(missing_ok=True)
     print(f"stretches: {P:,}  estimates: {lv.size:,}")
     for L in (1, 2, 3, 4):
         print(f"  L{L}: {np.mean(lv == L):.1%}")

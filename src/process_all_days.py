@@ -26,7 +26,8 @@ for day in days:
         z.extract(path=GPS, targets=[name])
     print(f"{day}: unpacked in {time.time() - t:.0f}s", flush=True)
     r = subprocess.run([sys.executable, "gps_process.py", day])
-    (GPS / name).unlink(missing_ok=True)
+    for suffix in ("", "-shm", "-wal"):
+        (GPS / (name + suffix)).unlink(missing_ok=True)
     if r.returncode != 0:
         print(f"{day}: FAILED", flush=True)
 
