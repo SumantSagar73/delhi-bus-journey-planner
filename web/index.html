@@ -1,0 +1,388 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Delhi Bus Planner</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  :root { --bg:#f4f6f8; --panel:#fff; --ink:#18202b; --muted:#5f6b7a; --line:#e3e7ec; --soft:#eef3f3;
+          --accent:#0a7a74; --accent2:#085e5a; --walk:#98a2b3; --wait:#f2b33d; --bus:#0a7a74; --bad:#c4320a; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color:var(--ink); background:var(--bg); }
+  .app { display:grid; grid-template-columns:420px 1fr; height:100vh; }
+  aside { background:var(--panel); border-right:1px solid var(--line); overflow-y:auto; display:flex; flex-direction:column; }
+  header { padding:16px 18px 10px; }
+  h1 { font-size:19px; margin:0; display:flex; align-items:center; gap:8px; }
+  .sub { color:var(--muted); font-size:12px; margin-top:2px; }
+  .form { padding:4px 18px 14px; border-bottom:1px solid var(--line); }
+  .field { position:relative; margin-top:10px; }
+  .field label { display:block; font-size:11px; font-weight:600; letter-spacing:.04em; text-transform:uppercase; color:var(--muted); margin-bottom:4px; }
+  .inp { display:flex; align-items:center; border:1px solid var(--line); border-radius:10px; background:#fff; }
+  .inp:focus-within { border-color:var(--accent); box-shadow:0 0 0 3px #0a7a7420; }
+  .dot { width:10px; height:10px; border-radius:50%; margin-left:12px; flex:none; }
+  .inp input { flex:1; border:0; outline:0; padding:10px; font:inherit; background:transparent; color:var(--ink); min-width:0; }
+  .i { width:16px; height:16px; stroke:currentColor; fill:none; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; vertical-align:-3px; flex:none; }
+  .i.lg { width:22px; height:22px; color:var(--accent); }
+  .pill .i { width:14px; height:14px; margin-right:3px; }
+  .walkseg { display:inline-flex; align-items:center; gap:1px; }
+  .icon-btn { border:0; background:none; cursor:pointer; padding:8px 10px; color:var(--muted); font-size:15px; }
+  .icon-btn:hover { color:var(--accent); }
+  .menu { position:absolute; left:0; right:0; top:100%; margin-top:4px; background:#fff; border:1px solid var(--line); border-radius:10px;
+          box-shadow:0 8px 24px #0002; max-height:300px; overflow-y:auto; z-index:1000; display:none; }
+  .menu.open { display:block; }
+  .opt { padding:8px 12px; cursor:pointer; display:flex; justify-content:space-between; gap:8px; }
+  .opt:hover, .opt.act { background:var(--soft); }
+  .opt .h { color:var(--muted); font-size:12px; display:block; }
+  .opt .n { color:var(--muted); font-size:11px; white-space:nowrap; align-self:center; }
+  .swap { position:absolute; right:-6px; top:58px; }
+  .section-title { font-size:11px; font-weight:600; letter-spacing:.04em; text-transform:uppercase; color:var(--muted); margin:12px 0 6px; }
+  .seg { display:flex; background:var(--soft); border-radius:10px; padding:3px; gap:3px; }
+  .seg button { flex:1; border:0; background:none; padding:7px 4px; border-radius:8px; cursor:pointer; font:inherit; color:var(--muted); }
+  .seg button.on { background:#fff; color:var(--ink); font-weight:600; box-shadow:0 1px 3px #0002; }
+  .times { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; align-items:center; }
+  .pill { border:1px solid var(--line); background:#fff; border-radius:999px; padding:5px 11px; cursor:pointer; font:inherit; font-size:13px; color:var(--ink); }
+  .pill.on { border-color:var(--accent); background:var(--accent); color:#fff; }
+  input[type=time] { border:1px solid var(--line); border-radius:999px; padding:4px 10px; font:inherit; font-size:13px; }
+  .go { margin-top:14px; width:100%; border:0; border-radius:10px; padding:12px; background:var(--accent); color:#fff; font:inherit; font-weight:700; font-size:15px; cursor:pointer; }
+  .go:hover { background:var(--accent2); }
+  .go:disabled { opacity:.6; cursor:wait; }
+  .examples { margin-top:10px; font-size:12px; color:var(--muted); }
+  .examples a { color:var(--accent); cursor:pointer; text-decoration:underline; }
+  #out { padding:6px 18px 18px; flex:1; }
+  .route-head { color:var(--muted); font-size:12px; margin:10px 0 2px; }
+  .card { border:1px solid var(--line); border-radius:12px; padding:14px; margin-top:12px; cursor:pointer; background:#fff; transition:box-shadow .15s; }
+  .card:hover { box-shadow:0 2px 10px #0001; }
+  .card.sel { border-color:var(--accent); box-shadow:0 0 0 2px #0a7a7430; }
+  .badge { display:inline-block; font-size:11px; font-weight:700; color:var(--accent); background:var(--soft); border-radius:6px; padding:1px 7px; margin-bottom:6px; }
+  .top { display:flex; justify-content:space-between; align-items:baseline; }
+  .big { font-size:26px; font-weight:800; letter-spacing:-.02em; }
+  .big small { font-size:14px; font-weight:600; color:var(--muted); }
+  .clock { color:var(--muted); font-weight:600; }
+  .chips { margin:8px 0 6px; display:flex; flex-wrap:wrap; gap:5px; align-items:center; color:var(--muted); }
+  .chip { background:var(--accent); color:#fff; border-radius:6px; padding:2px 8px; font-weight:700; font-size:12px; }
+  .bar { display:flex; height:8px; border-radius:4px; overflow:hidden; margin:8px 0 4px; background:var(--soft); }
+  .bar span { display:block; height:100%; }
+  .barkey { display:flex; gap:12px; font-size:12px; color:var(--muted); flex-wrap:wrap; }
+  .barkey i { display:inline-block; width:8px; height:8px; border-radius:2px; margin-right:4px; vertical-align:middle; }
+  .insight { margin-top:10px; font-size:13px; background:var(--soft); border-radius:10px; padding:10px; }
+  .insight b { color:var(--ink); }
+  .insight .bad { color:var(--bad); }
+  .chart { display:flex; align-items:flex-end; gap:2px; height:56px; margin-top:8px; }
+  .chart div { flex:1; background:#b9d9d6; border-radius:2px 2px 0 0; }
+  .chart div.now { background:var(--accent); }
+  .axis { display:flex; justify-content:space-between; font-size:10px; color:var(--muted); margin-top:2px; }
+  .steps { margin-top:12px; display:none; }
+  .card.sel .steps { display:block; }
+  .step { display:flex; gap:10px; padding:7px 0; font-size:13px; }
+  .step .ic { width:26px; height:26px; border-radius:50%; display:flex; align-items:center; justify-content:center; flex:none; font-size:13px; background:var(--soft); }
+  .step.bus .ic { background:var(--accent); color:#fff; font-weight:700; font-size:11px; }
+  .step .t { color:var(--muted); font-size:12px; }
+  .q { color:var(--muted); font-size:12px; }
+  .msg { margin-top:16px; padding:14px; border-radius:10px; background:#fff4ed; color:#93370d; }
+  .empty { margin-top:24px; color:var(--muted); text-align:center; font-size:13px; }
+  .spinner { width:22px; height:22px; border:3px solid var(--soft); border-top-color:var(--accent); border-radius:50%; animation:spin .8s linear infinite; margin:24px auto; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  .mapbox { position:relative; }
+  #map { height:100%; }
+  .traffic { position:absolute; right:12px; top:12px; z-index:500; background:#fff; border-radius:12px; box-shadow:0 4px 16px #0002; padding:10px 12px; width:250px; font-size:13px; }
+  .traffic .row { display:flex; justify-content:space-between; align-items:center; gap:8px; }
+  .traffic input[type=range] { width:100%; }
+  .legend { display:flex; gap:8px; font-size:11px; color:var(--muted); margin-top:4px; }
+  .sw { width:16px; height:4px; display:inline-block; border-radius:2px; vertical-align:middle; margin-right:3px; }
+  .switch { position:relative; width:36px; height:20px; flex:none; }
+  .switch input { display:none; }
+  .switch span { position:absolute; inset:0; background:#cfd6dd; border-radius:999px; cursor:pointer; transition:.2s; }
+  .switch span:before { content:""; position:absolute; width:16px; height:16px; left:2px; top:2px; background:#fff; border-radius:50%; transition:.2s; }
+  .switch input:checked + span { background:var(--accent); }
+  .switch input:checked + span:before { transform:translateX(16px); }
+  .endpin { width:28px; height:28px; border-radius:50%; border:3px solid #fff; box-shadow:0 2px 6px #0004; color:#fff; font-weight:800; font-size:13px; display:flex; align-items:center; justify-content:center; }
+  .stoplbl { background:#fff; border:0; border-radius:6px; box-shadow:0 2px 8px #0002; font-size:12px; padding:4px 8px; color:var(--ink); }
+  .stoplbl:before { display:none; }
+  .scale { display:flex; height:6px; border-radius:3px; overflow:hidden; margin-top:8px; }
+  .scale span { flex:1; }
+  .leaflet-container { background:#e8e8e6; font:inherit; }
+  .pickhint { position:absolute; left:50%; top:12px; transform:translateX(-50%); z-index:500; background:var(--ink); color:#fff; padding:8px 14px; border-radius:999px; font-size:13px; display:none; }
+  @media (max-width: 860px) {
+    .app { grid-template-columns:1fr; grid-template-rows:auto 60vh; height:auto; }
+    aside { border-right:0; order:1; } .mapbox { order:2; height:60vh; }
+    .traffic { width:210px; }
+  }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-bus" viewBox="0 0 24 24"><path d="M8 6v6M15 6v6M2 12h19.6M18 18h3s.5-1.7.8-2.8c.1-.4.2-.8.2-1.2 0-.4-.1-.8-.2-1.2l-1.4-5C20.1 6.8 19.1 6 18 6H4a2 2 0 0 0-2 2v10h3"/><circle cx="7" cy="18" r="2"/><path d="M9 18h5"/><circle cx="16" cy="18" r="2"/></symbol>
+  <symbol id="i-pin" viewBox="0 0 24 24"><path d="M20 10c0 5-5.5 10.2-7.4 11.8a1 1 0 0 1-1.2 0C9.5 20.2 4 15 4 10a8 8 0 0 1 16 0"/><circle cx="12" cy="10" r="3"/></symbol>
+  <symbol id="i-walk" viewBox="0 0 24 24"><circle cx="13" cy="4" r="1.6"/><path d="M10 21l2.2-6.2L15 17v4M9 9.5l3-1.8 2.5 2.3 3 1.2M12 7.7l-1.3 5.8M8 14l1.2-4"/></symbol>
+  <symbol id="i-swap" viewBox="0 0 24 24"><path d="m21 16-4 4-4-4M17 20V4M3 8l4-4 4 4M7 4v16"/></symbol>
+  <symbol id="i-sunrise" viewBox="0 0 24 24"><path d="M12 2v8M4.9 10.9l1.4 1.4M2 18h2M20 18h2M19.1 10.9l-1.4 1.4M22 22H2M8 6l4-4 4 4M16 18a4 4 0 0 0-8 0"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M6.3 17.7l-1.4 1.4M19.1 4.9l-1.4 1.4"/></symbol>
+  <symbol id="i-sunset" viewBox="0 0 24 24"><path d="M12 10V2M4.9 10.9l1.4 1.4M2 18h2M20 18h2M19.1 10.9l-1.4 1.4M22 22H2M16 6l-4 4-4-4M16 18a4 4 0 0 0-8 0"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+</svg>
+<div class="app">
+<aside>
+  <header>
+    <h1><svg class="i lg"><use href="#i-bus"/></svg>Delhi Bus Planner</h1>
+    <div class="sub">Real travel times learned from 6,000+ DTC buses' GPS. Times change with the hour and the day.</div>
+  </header>
+
+  <div class="form">
+    <div class="field" id="f-from">
+      <label>From</label>
+      <div class="inp"><span class="dot" style="background:#12b76a"></span><input placeholder="Type a stop or area, e.g. Kashmere Gate" autocomplete="off"><button class="icon-btn pick" title="Pick on map"><svg class="i"><use href="#i-pin"/></svg></button></div>
+      <div class="menu"></div>
+    </div>
+    <div class="field" id="f-to">
+      <label>To</label>
+      <div class="inp"><span class="dot" style="background:#d92d20"></span><input placeholder="Type a stop or area, e.g. Nehru Place" autocomplete="off"><button class="icon-btn pick" title="Pick on map"><svg class="i"><use href="#i-pin"/></svg></button></div>
+      <div class="menu"></div>
+    </div>
+    <button class="icon-btn" id="swap" title="Swap from and to" style="float:right;margin-top:2px;display:flex;align-items:center;gap:4px"><svg class="i"><use href="#i-swap"/></svg> Swap</button>
+
+    <div class="section-title">When</div>
+    <div class="seg" id="day">
+      <button data-v="weekday" class="on">Weekday</button><button data-v="saturday">Saturday</button><button data-v="sunday" title="Sundays and public holidays">Sunday</button>
+    </div>
+    <div class="times" id="times">
+      <button class="pill on" data-t="08:30"><svg class="i"><use href="#i-sunrise"/></svg>Morning rush</button>
+      <button class="pill" data-t="13:00"><svg class="i"><use href="#i-sun"/></svg>Midday</button>
+      <button class="pill" data-t="18:30"><svg class="i"><use href="#i-sunset"/></svg>Evening rush</button>
+      <button class="pill" data-t="22:30"><svg class="i"><use href="#i-moon"/></svg>Late night</button>
+      <input type="time" id="time" value="08:30" title="Exact time">
+    </div>
+
+    <button class="go" id="go">Find buses</button>
+    <div class="examples">Try: <a data-a="ISBT Kashmere Gate" data-b="Nehru Place">Kashmere Gate → Nehru Place</a> ·
+      <a data-a="Anand Vihar ISBT" data-b="Dhaula Kuan">Anand Vihar → Dhaula Kuan</a> ·
+      <a data-a="Dwarka Sector 1" data-b="AIIMS">Dwarka → AIIMS</a></div>
+  </div>
+
+  <div id="out"><div class="empty">Choose where you're going and press <b>Find buses</b>.</div></div>
+</aside>
+
+<div class="mapbox">
+  <div id="map"></div>
+  <div class="pickhint" id="pickhint">Click on the map to set the location</div>
+  <div class="traffic">
+    <div class="row"><b>Traffic map</b><label class="switch"><input type="checkbox" id="tOn"><span></span></label></div>
+    <div class="q">How fast buses move on each road</div>
+    <div class="row" style="margin-top:6px"><span id="tLabel">Weekday 08:00</span></div>
+    <input type="range" id="tHour" min="5" max="23" value="8">
+    <div class="scale"><span style="background:#b42318"></span><span style="background:#f04438"></span><span style="background:#f79009"></span><span style="background:#84cc16"></span><span style="background:#16a34a"></span></div>
+    <div class="legend" style="justify-content:space-between"><span>slow &lt;10 km/h</span><span>fast &gt;24 km/h</span></div>
+  </div>
+</div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const map = L.map('map', {zoomControl: false, preferCanvas: true}).setView([28.62, 77.2], 11);
+L.control.zoom({position: 'bottomright'}).addTo(map);
+const ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/';
+L.tileLayer(ESRI + 'World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}', {maxZoom: 16, attribution: 'Basemap &copy; Esri, HERE, Garmin, &copy; OpenStreetMap contributors'}).addTo(map);
+map.createPane('labels'); map.getPane('labels').style.zIndex = 450; map.getPane('labels').style.pointerEvents = 'none';
+L.tileLayer(ESRI + 'World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}', {maxZoom: 16, pane: 'labels'}).addTo(map);
+const LEG_COLORS = ['#0a7a74', '#3b5bdb', '#c2410c', '#7c3aed'];
+const endIcon = (txt, color) => L.divIcon({className: '', iconSize: [28, 28], iconAnchor: [14, 14],
+  html: `<div class="endpin" style="background:${color}">${txt}</div>`});
+const tripLayer = L.layerGroup().addTo(map), trafficLayer = L.layerGroup(), pinLayer = L.layerGroup().addTo(map);
+
+// ---------- state ----------
+const DAY_DATE = {weekday: '2026-10-27', saturday: '2026-10-31', sunday: '2026-10-25'};  // dates in the GPS month
+const DAY_LABEL = {weekday: 'Weekday', saturday: 'Saturday', sunday: 'Sunday'};
+let PLACES = [], last = null, day = 'weekday', picking = null;
+const sel = {from: null, to: null};   // {id, label, lat, lon}
+
+// ---------- place dropdowns ----------
+fetch('/places').then(r => r.json()).then(js => {
+  PLACES = js.map(p => ({...p, key: (p.name + ' ' + p.hint).toLowerCase()}));
+  setPlace('from', PLACES.find(p => p.name === 'ISBT Kashmere Gate') || PLACES[0]);
+  setPlace('to', PLACES.find(p => p.name === 'Nehru Place') || PLACES[1]);
+});
+
+function search(q) {
+  const words = q.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  if (!words.length) return PLACES.slice(0, 30);
+  const out = [];
+  for (const p of PLACES) {
+    let score = 0, ok = true;
+    for (const w of words) {
+      const i = p.key.indexOf(w);
+      if (i < 0) { ok = false; break; }
+      score += (i === 0 || p.key[i - 1] === ' ') ? 2 : 1;
+    }
+    if (ok) out.push([score + Math.min(p.routes, 100) / 100, p]);
+  }
+  return out.sort((a, b) => b[0] - a[0]).slice(0, 40).map(x => x[1]);
+}
+
+function setPlace(which, p) {
+  sel[which] = {id: p.id, label: p.name + (p.hint ? ' (' + p.hint + ')' : ''), lat: p.lat, lon: p.lon};
+  $(`#f-${which} input`).value = sel[which].label;
+  drawPins();
+}
+
+['from', 'to'].forEach(which => {
+  const f = $(`#f-${which}`), input = f.querySelector('input'), menu = f.querySelector('.menu');
+  let items = [], act = 0;
+  const render = () => {
+    menu.innerHTML = items.length ? items.map((p, i) => `<div class="opt ${i === act ? 'act' : ''}" data-i="${i}"><span>${esc(p.name)}${p.hint ? `<span class="h">${esc(p.hint)}</span>` : ''}</span><span class="n">${p.routes} routes</span></div>`).join('')
+      : '<div class="opt q">No matching stop. Try another spelling, or pick a point on the map.</div>';
+    menu.classList.add('open');
+    menu.querySelectorAll('.opt[data-i]').forEach(o => o.onmousedown = e => { e.preventDefault(); choose(+o.dataset.i); });
+  };
+  const choose = i => { if (items[i]) { setPlace(which, items[i]); menu.classList.remove('open'); input.blur(); } };
+  input.addEventListener('focus', () => { input.select(); items = search(''); act = 0; render(); });
+  input.addEventListener('input', () => { items = search(input.value); act = 0; render(); });
+  input.addEventListener('keydown', e => {
+    if (e.key === 'ArrowDown') { act = Math.min(act + 1, items.length - 1); render(); e.preventDefault(); }
+    else if (e.key === 'ArrowUp') { act = Math.max(act - 1, 0); render(); e.preventDefault(); }
+    else if (e.key === 'Enter') { choose(act); e.preventDefault(); }
+    else if (e.key === 'Escape') { menu.classList.remove('open'); input.blur(); }
+  });
+  input.addEventListener('blur', () => setTimeout(() => { menu.classList.remove('open'); if (sel[which]) input.value = sel[which].label; }, 150));
+  f.querySelector('.pick').onclick = () => { picking = which; $('#pickhint').style.display = 'block'; map.getContainer().style.cursor = 'crosshair'; };
+});
+
+map.on('click', e => {
+  if (!picking) return;
+  const {lat, lng} = e.latlng;
+  sel[picking] = {id: lat.toFixed(5) + ',' + lng.toFixed(5), label: 'Pinned location', lat, lon: lng};
+  $(`#f-${picking} input`).value = sel[picking].label;
+  picking = null; $('#pickhint').style.display = 'none'; map.getContainer().style.cursor = '';
+  drawPins();
+});
+
+function drawPins() {
+  pinLayer.clearLayers();
+  if (sel.from) L.marker([sel.from.lat, sel.from.lon], {icon: endIcon('A', '#12b76a'), zIndexOffset: 1000}).bindTooltip('From: ' + sel.from.label).addTo(pinLayer);
+  if (sel.to) L.marker([sel.to.lat, sel.to.lon], {icon: endIcon('B', '#d92d20'), zIndexOffset: 1000}).bindTooltip('To: ' + sel.to.label).addTo(pinLayer);
+}
+
+$('#swap').onclick = () => { [sel.from, sel.to] = [sel.to, sel.from]; $('#f-from input').value = sel.from?.label || ''; $('#f-to input').value = sel.to?.label || ''; drawPins(); };
+document.querySelectorAll('.examples a').forEach(a => a.onclick = () => {
+  const A = PLACES.find(p => p.name === a.dataset.a), B = PLACES.find(p => p.name === a.dataset.b);
+  if (A) setPlace('from', A); if (B) setPlace('to', B); plan();
+});
+
+// ---------- when ----------
+document.querySelectorAll('#day button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('#day button').forEach(x => x.classList.toggle('on', x === b)); day = b.dataset.v; updTrafficLabel();
+  if ($('#tOn').checked) loadTraffic();
+});
+document.querySelectorAll('#times .pill').forEach(b => b.onclick = () => {
+  document.querySelectorAll('#times .pill').forEach(x => x.classList.toggle('on', x === b)); $('#time').value = b.dataset.t;
+  $('#tHour').value = +b.dataset.t.slice(0, 2); updTrafficLabel(); if ($('#tOn').checked) loadTraffic();
+});
+$('#time').oninput = () => document.querySelectorAll('#times .pill').forEach(x => x.classList.toggle('on', x.dataset.t === $('#time').value));
+
+// ---------- plan ----------
+$('#go').onclick = plan;
+async function plan() {
+  if (!sel.from || !sel.to) { $('#out').innerHTML = '<div class="msg">Please choose both a start and a destination.</div>'; return; }
+  $('#go').disabled = true; $('#out').innerHTML = '<div class="spinner"></div><div class="empty" style="margin-top:0">Finding the best buses…</div>';
+  const depart = DAY_DATE[day] + 'T' + $('#time').value;
+  try {
+    const r = await fetch(`/journeys?from=${encodeURIComponent(sel.from.id)}&to=${encodeURIComponent(sel.to.id)}&depart=${depart}&options=3`);
+    const js = await r.json();
+    if (!r.ok) throw new Error(js.detail || 'Something went wrong');
+    last = js; render();
+  } catch (e) {
+    $('#out').innerHTML = `<div class="msg">Sorry, couldn't plan this trip: ${esc(e.message)}</div>`;
+  } finally { $('#go').disabled = false; }
+}
+
+function render() {
+  const js = last, hour = +$('#time').value.slice(0, 2);
+  let h = `<div class="route-head">${DAY_LABEL[day]} at ${$('#time').value} · ${js.options.length} option${js.options.length === 1 ? '' : 's'}</div>`;
+  if (!js.options.length) h += '<div class="msg">No bus journey found within walking distance of these places at this time. Try another time or a nearby stop.</div>';
+  const fastest = Math.min(...js.options.map(o => o.total_min));
+  js.options.forEach((o, i) => {
+    o.legs = o.legs.filter(l => l.type === 'bus' || l.minutes >= 0.5 || o.legs.length === 1);
+    const isWalk = o.legs.every(l => l.type === 'walk');
+    const chips = o.legs.map(l => l.type === 'bus' ? `<span class="chip">${esc(l.route)}</span>` : `<span class="walkseg">${ICON('walk')}${Math.round(l.minutes)}′</span>`).join(ICON('chev'));
+    const tot = o.total_min, w = o.walk_min || 0, wt = o.wait_min || 0, b = o.in_bus_min || 0;
+    const bar = isWalk ? '' : `<div class="bar"><span style="width:${w / tot * 100}%;background:var(--walk)"></span><span style="width:${wt / tot * 100}%;background:var(--wait)"></span><span style="width:${b / tot * 100}%;background:var(--bus)"></span></div>
+      <div class="barkey"><span><i style="background:var(--walk)"></i>walk ${Math.round(w)} min</span><span><i style="background:var(--wait)"></i>wait ${Math.round(wt)} min</span><span><i style="background:var(--bus)"></i>on bus ${Math.round(b)} min</span><span>${o.transfers === 0 ? 'no change' : o.transfers + ' change' + (o.transfers > 1 ? 's' : '')}</span></div>`;
+    let insight = '';
+    if (o.by_hour) {
+      const vals = Object.entries(o.by_hour), mx = Math.max(...vals.map(v => v[1]));
+      const extra = Math.round(tot - o.quiet_hour.total_min);
+      insight = `<div class="insight">
+        ${extra >= 3 ? `${ICON('clock')} Traffic adds about <b>${extra} min</b>. At a quiet time (${o.quiet_hour.hour}) this trip takes <b>${Math.round(o.quiet_hour.total_min)} min</b>.` : `${ICON('check')} Little traffic effect at this time. The quietest time (${o.quiet_hour.hour}) is <b>${Math.round(o.quiet_hour.total_min)} min</b>.`}
+        <br>On a bad day it can take <b class="bad">${Math.round(o.total_min_bad_day)} min</b>. The official timetable says ${Math.round(o.total_min_timetable)} min.
+        <div class="chart">${vals.map(([hh, v]) => `<div class="${+hh === hour ? 'now' : ''}" style="height:${(v / mx * 100).toFixed(0)}%" title="Leaving ${hh}:30 → ${Math.round(v)} min"></div>`).join('')}</div>
+        <div class="axis"><span>5 am</span><span>9 am</span><span>1 pm</span><span>5 pm</span><span>11 pm</span></div>
+        <div class="q" style="margin-top:4px">Trip time if you leave at each hour of the day (dark bar = your time)</div></div>`;
+    }
+    const steps = o.legs.map(l => l.type === 'bus'
+      ? `<div class="step bus"><div class="ic">${esc(l.route.replace(/(UP|DOWN)$/, ''))}</div><div><b>Take bus ${esc(l.route)}</b> <span class="t">towards ${esc((l.route_desc.split(' to ')[1] || l.route_desc))}</span><br>
+         Board at <b>${esc(l.board_stop)}</b>. The bus comes about every ${Math.max(1, Math.round(l.wait_minutes * 2))} min, so expect a ~${Math.round(l.wait_minutes)} min wait.<br>
+         Ride ${l.n_stops} stops (${Math.round(l.ride_minutes)} min), get off at <b>${esc(l.alight_stop)}</b> <span class="t">~${l.alight_time}</span><br>
+         <span class="t">${Math.round((l.data_quality.L1 + l.data_quality.L2) * 100)}% of this ride is timed from real GPS measurements of this road</span></div></div>`
+      : `<div class="step"><div class="ic">${ICON('walk')}</div><div>Walk <b>${Math.round(l.minutes)} min</b> (${l.distance_m} m) to ${esc(l.to)}</div></div>`).join('');
+    h += `<div class="card" data-i="${i}">
+      ${tot === fastest && js.options.length > 1 ? '<span class="badge">FASTEST</span>' : ''}
+      <div class="top"><span class="big">${Math.round(tot)} <small>min</small></span><span class="clock">${o.depart} → ${o.arrive}</span></div>
+      <div class="chips">${chips}</div>${bar}${insight}
+      <div class="steps">${steps}</div></div>`;
+  });
+  $('#out').innerHTML = h;
+  document.querySelectorAll('.card').forEach(c => c.onclick = () => show(+c.dataset.i));
+  if (js.options.length) show(0);
+}
+
+function show(i) {
+  document.querySelectorAll('.card').forEach(c => c.classList.toggle('sel', +c.dataset.i === i));
+  tripLayer.clearLayers();
+  const o = last.options[i], all = [];
+  let busN = 0;
+  const busLegs = o.legs.filter(l => l.type === 'bus');
+  o.legs.forEach(l => {
+    const path = l.path && l.path.length > 1 ? l.path : (l.stops || []).map(s => [s.lat, s.lon]);
+    path.forEach(p => all.push(p));
+    if (path.length < 2) return;
+    if (l.type !== 'bus') {
+      L.polyline(path, {color: '#475467', weight: 4, opacity: .8, dashArray: '1 8', lineCap: 'round'}).bindTooltip(`Walk ${Math.round(l.minutes)} min`).addTo(tripLayer);
+      return;
+    }
+    const legNo = busN, c = LEG_COLORS[busN++ % LEG_COLORS.length];
+    const isLastBus = legNo === busLegs.length - 1;
+    L.polyline(path, {color: '#fff', weight: 10, opacity: 1}).addTo(tripLayer);
+    L.polyline(path, {color: c, weight: 6, opacity: 1}).bindTooltip(`Bus ${l.route} · ${Math.round(l.ride_minutes)} min`, {sticky: true}).addTo(tripLayer);
+    (l.stops || []).forEach((s, k) => {
+      const first = k === 0, lastStop = k === l.stops.length - 1, end = first || lastStop;
+      const m = L.circleMarker([s.lat, s.lon], {radius: end ? 7 : 3.5, color: c, weight: end ? 3 : 2, fillColor: '#fff', fillOpacity: 1}).addTo(tripLayer);
+      // label board stops and the final get-off stop; a change stop gets one label ("Change to ...")
+      const label = first ? `<b>${esc(s.name)}</b><br>${legNo === 0 ? 'Board' : 'Change to'} bus ${esc(l.route)}`
+                  : (lastStop && isLastBus) ? `<b>${esc(s.name)}</b><br>Get off bus ${esc(l.route)}` : null;
+      if (label) m.bindTooltip(label, {permanent: true, direction: 'right', offset: [8, 0], className: 'stoplbl'});
+      else m.bindTooltip(esc(s.name));
+    });
+  });
+  if (all.length) map.fitBounds(all, {paddingTopLeft: [40, 40], paddingBottomRight: [290, 40]});
+}
+
+// ---------- traffic ----------
+function updTrafficLabel() { $('#tLabel').textContent = `${DAY_LABEL[day]} ${String($('#tHour').value).padStart(2, '0')}:00`; }
+$('#tHour').oninput = () => { updTrafficLabel(); clearTimeout(window._tt); window._tt = setTimeout(() => $('#tOn').checked && loadTraffic(), 250); };
+$('#tOn').onchange = () => $('#tOn').checked ? loadTraffic() : map.removeLayer(trafficLayer);
+async function loadTraffic() {
+  const js = await (await fetch(`/traffic?day_type=${day}&hour=${$('#tHour').value}`)).json();
+  trafficLayer.clearLayers();
+  js.segments.forEach(sg => L.polyline(sg.path, {color: speedColor(sg.kmh), weight: 3, opacity: .85, interactive: false, renderer: trafficCanvas}).addTo(trafficLayer));
+  trafficLayer.addTo(map);
+}
+const trafficCanvas = L.canvas({padding: .3});
+function speedColor(k) { return k < 10 ? '#b42318' : k < 14 ? '#f04438' : k < 18 ? '#f79009' : k < 24 ? '#84cc16' : '#16a34a'; }
+function ICON(n) { return `<svg class="i"><use href="#i-${n}"/></svg>`; }
+function esc(s) { return String(s ?? '').replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c])); }
+</script>
+</body>
+</html>

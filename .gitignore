@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+data/raw/
+data/gps/
+data/gtfs/
+data/events/
+data/work.duckdb
+data/*.log
+data/model_test/
+.claude/settings.local.json
+data/model_val/
+validation/rides_test.csv
+src/.tmp/
+.claude/
